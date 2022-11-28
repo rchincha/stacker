@@ -2,6 +2,7 @@ package stacker
 
 import (
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -16,7 +17,9 @@ import (
 )
 
 // download with caching support in the specified cache dir.
-func Download(cacheDir string, url string, progress bool, expectedHash, remoteHash, remoteSize string) (string, error) {
+func Download(cacheDir string, url string, progress bool, expectedHash, remoteHash, remoteSize string,
+	mode *fs.FileMode, uid, gid *int,
+) (string, error) {
 	name := path.Join(cacheDir, path.Base(url))
 
 	if fi, err := os.Stat(name); err == nil {
@@ -105,6 +108,32 @@ func Download(cacheDir string, url string, progress bool, expectedHash, remoteHa
 			os.RemoveAll(name)
 			return "", errors.Errorf("Downloaded file hash does not match. Expected: %s Actual: %s", expectedHash, downloadHash)
 		}
+	}
+
+	if mode != nil {
+		err = out.Chmod(*mode)
+		if err != nil {
+			return "", errors.Wrapf(err, "Coudn't chmod file %s", name)
+		}
+	}
+
+	var cuid int
+	if uid != nil {
+		cuid = *uid
+	} else {
+		cuid = os.Getuid()
+	}
+
+	var cgid int
+	if gid != nil {
+		cgid = *gid
+	} else {
+		cgid = os.Getgid()
+	}
+
+	err = out.Chown(cuid, cgid)
+	if err != nil {
+		return "", errors.Wrapf(err, "Coudn't chown file %s", source)
 	}
 
 	return name, err

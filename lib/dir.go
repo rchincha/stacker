@@ -1,8 +1,11 @@
 package lib
 
 import (
+	"io/fs"
 	"os"
 	"path"
+	"strconv"
+	"strings"
 
 	"github.com/pkg/errors"
 )
@@ -62,7 +65,7 @@ func DirCopy(dest string, source string) error {
 				return err
 			}
 		} else {
-			if err = FileCopy(dstfp, srcfp); err != nil {
+			if err = FileCopy(dstfp, srcfp, nil, nil, nil); err != nil {
 				return err
 			}
 		}
@@ -80,6 +83,58 @@ func CopyThing(srcpath, destpath string) error {
 	if srcInfo.IsDir() {
 		return DirCopy(destpath, srcpath)
 	} else {
-		return FileCopy(destpath, srcpath)
+		return FileCopy(destpath, srcpath, nil, nil, nil)
 	}
+}
+
+// Chmod changes file permissions
+func Chmod(perms, destpath string) error {
+	destInfo, err := os.Lstat(destpath)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	if destInfo.IsDir() {
+		return errors.WithStack(os.ErrInvalid)
+	}
+
+	// read as an octal value
+	iperms, err := strconv.ParseUint(perms, 8, 32)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	return os.Chmod(destpath, fs.FileMode(iperms))
+}
+
+// Chown changes file ownership
+func Chown(owner, destpath string) error {
+	destInfo, err := os.Lstat(destpath)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	if destInfo.IsDir() {
+		return errors.WithStack(os.ErrInvalid)
+	}
+
+	owns := strings.Split(owner, ":")
+	if len(owns) > 2 {
+		return errors.WithStack(os.ErrInvalid)
+	}
+
+	uid, err := strconv.ParseInt(owns[0], 10, 32)
+	if err != nil {
+		return errors.WithStack(err)
+	}
+
+	gid := int64(-1)
+	if len(owns) > 1 {
+		gid, err = strconv.ParseInt(owns[1], 10, 32)
+		if err != nil {
+			return errors.WithStack(err)
+		}
+	}
+
+	return os.Chown(destpath, int(uid), int(gid))
 }

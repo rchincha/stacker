@@ -2,6 +2,7 @@ package types
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -15,10 +16,11 @@ import (
 )
 
 const (
-	DockerLayer = "docker"
-	TarLayer    = "tar"
-	OCILayer    = "oci"
-	BuiltLayer  = "built"
+	DockerLayer  = "docker"
+	TarLayer     = "tar"
+	OCILayer     = "oci"
+	BuiltLayer   = "built"
+	ScratchLayer = "scratch"
 )
 
 func IsContainersImageLayer(from string) bool {
@@ -33,16 +35,22 @@ func IsContainersImageLayer(from string) bool {
 }
 
 type Import struct {
-	Path string `yaml:"path"`
-	Hash string `yaml:"hash"`
+	Path string       `yaml:"path"`
+	Hash string       `yaml:"hash"`
+	Dest string       `yaml:"dest"`
+	Mode *fs.FileMode `yaml:"mode"`
+	Uid  *int         `yaml:"uid"`
+	Gid  *int         `yaml:"gid"`
 }
+
+type Imports []Import
 
 type OverlayDir struct {
 	Source string `yaml:"source"`
 	Dest   string `yaml:"dest"`
 }
 
-type Imports []Import
+type OverlayDirs []OverlayDir
 
 func getStringOrStringSlice(iface interface{}, xform func(string) ([]string, error)) ([]string, error) {
 	// The user didn't supply run: at all, so let's not do anything.
@@ -177,7 +185,7 @@ func (bs *Binds) UnmarshalYAML(unmarshal func(interface{}) error) error {
 type Layer struct {
 	From           ImageSource       `yaml:"from"`
 	Imports        Imports           `yaml:"import"`
-	OverlayDirs    []OverlayDir      `yaml:"overlay_dirs"`
+	OverlayDirs    OverlayDirs       `yaml:"overlay_dirs"`
 	Run            StringList        `yaml:"run"`
 	Cmd            Command           `yaml:"cmd"`
 	Entrypoint     Command           `yaml:"entrypoint"`
@@ -312,7 +320,7 @@ func (l Layer) absolutify(referenceDirectory string) (Layer, error) {
 		if err != nil {
 			return ret, err
 		}
-		absImport := Import{Hash: rawImport.Hash, Path: absImportPath}
+		absImport := Import{Hash: rawImport.Hash, Path: absImportPath, Dest: rawImport.Dest, Mode: rawImport.Mode, Uid: rawImport.Uid, Gid: rawImport.Gid}
 		ret.Imports = append(ret.Imports, absImport)
 	}
 
@@ -359,8 +367,11 @@ func requireImportHash(imports Imports) error {
 }
 
 func getImportFromInterface(v interface{}) (Import, error) {
+	var hash, dest string
+	var mode fs.FileMode
+	var uid, gid int
+
 	m, ok := v.(map[interface{}]interface{})
-	var hash string
 	if ok {
 		// check for nil hash so that we won't end up with "nil" string values
 		if m["hash"] == nil {
@@ -368,7 +379,30 @@ func getImportFromInterface(v interface{}) (Import, error) {
 		} else {
 			hash = fmt.Sprintf("%v", m["hash"])
 		}
-		return Import{Hash: hash, Path: fmt.Sprintf("%v", m["path"])}, nil
+
+		if m["dest"] != nil {
+			if !filepath.IsAbs(m["dest"].(string)) {
+				return Import{}, errors.Errorf("Dest path cannot be relative for: %#v", v)
+			}
+
+			dest = fmt.Sprintf("%v", m["dest"])
+		} else {
+			dest = ""
+		}
+
+		if m["mode"] != nil {
+			mode = fs.FileMode(m["mode"].(int))
+		}
+
+		if m["uid"] != nil {
+			uid = m["uid"].(int)
+		}
+
+		if m["gid"] != nil {
+			gid = m["gid"].(int)
+		}
+
+		return Import{Hash: hash, Path: fmt.Sprintf("%v", m["path"]), Dest: dest, Mode: &mode, Uid: &uid, Gid: &gid}, nil
 	}
 
 	m2, ok := v.(map[string]interface{})
@@ -379,7 +413,30 @@ func getImportFromInterface(v interface{}) (Import, error) {
 		} else {
 			hash = fmt.Sprintf("%v", m2["hash"])
 		}
-		return Import{Hash: hash, Path: fmt.Sprintf("%v", m2["Path"])}, nil
+
+		if m2["dest"] != nil {
+			if !filepath.IsAbs(m2["dest"].(string)) {
+				return Import{}, errors.Errorf("Dest path cannot be relative for: %#v", v)
+			}
+
+			dest = fmt.Sprintf("%v", m["dest"])
+		} else {
+			dest = ""
+		}
+
+		if m2["mode"] != nil {
+			mode = fs.FileMode(m2["mode"].(int))
+		}
+
+		if m2["uid"] != nil {
+			uid = m2["uid"].(int)
+		}
+
+		if m2["gid"] != nil {
+			gid = m2["gid"].(int)
+		}
+
+		return Import{Hash: hash, Path: fmt.Sprintf("%v", m2["path"]), Dest: dest, Mode: &mode, Uid: &uid, Gid: &gid}, nil
 	}
 
 	// if it's not a map then it's a string

@@ -2,6 +2,7 @@ package lib
 
 import (
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -9,7 +10,7 @@ import (
 	"github.com/pkg/errors"
 )
 
-func FileCopy(dest string, source string) error {
+func FileCopy(dest string, source string, mode *fs.FileMode, uid, gid *int) error {
 	os.RemoveAll(dest)
 
 	linkFI, err := os.Lstat(source)
@@ -44,9 +45,28 @@ func FileCopy(dest string, source string) error {
 	}
 	defer d.Close()
 
-	err = d.Chmod(fi.Mode())
+	if mode != nil {
+		err = d.Chmod(*mode)
+	} else {
+		err = d.Chmod(fi.Mode())
+	}
 	if err != nil {
 		return errors.Wrapf(err, "Coudn't chmod file %s", source)
+	}
+
+	cuid := int(-1)
+	if uid != nil {
+		cuid = *uid
+	}
+
+	cgid := int(-1)
+	if gid != nil {
+		cgid = *gid
+	}
+
+	err = d.Chown(cuid, cgid)
+	if err != nil {
+		return errors.Wrapf(err, "Coudn't chown file %s", source)
 	}
 
 	_, err = io.Copy(d, s)
