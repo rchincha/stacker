@@ -62,6 +62,14 @@ func New(sc types.StackerConfig, name string) (*Container, error) {
 	return c, nil
 }
 
+func (c *Container) Name() string {
+	return c.c.Name()
+}
+
+func (c *Container) State() int {
+	return int(c.c.State())
+}
+
 func (c *Container) BindMount(source string, dest string, extraOpts string) error {
 	createOpt := "create=dir"
 	stat, err := os.Stat(source)
@@ -138,6 +146,7 @@ func (c *Container) Execute(args string, stdin io.Reader) error {
 	// filesystem after execution. we should probably parameterize this in
 	// the storage API.
 	defer os.Remove(path.Join(c.sc.RootFSDir, c.c.Name(), "overlay", "stacker"))
+	defer os.Remove(path.Join(c.sc.RootFSDir, c.c.Name(), "overlay", "stacker-artifacts"))
 
 	cmd, cleanup, err := embed_exec.GetCommand(
 		c.sc.EmbeddedFS,

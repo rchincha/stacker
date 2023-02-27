@@ -61,6 +61,10 @@ var internalGoCmd = cli.Command{
 				},
 			},
 		},
+		&cli.Command{
+			Name:   "bom",
+			Action: doBom,
+		},
 	},
 	Before: doBeforeUmociSubcommand,
 }
@@ -207,4 +211,15 @@ func doAtomfsUmount(ctx *cli.Context) error {
 
 	mountpoint := ctx.Args().Get(0)
 	return atomfs.Umount(mountpoint)
+}
+
+func doBom(ctx *cli.Context) error {
+	if ctx.Args().Len() != 2 {
+		return errors.Errorf("wrong number of args")
+	}
+
+	return lib.GenerateBOM(lib.GenerateBOMOpts{
+		Path: ctx.Args().Get(0),
+		Dest: ctx.Args().Get(1),
+	})
 }

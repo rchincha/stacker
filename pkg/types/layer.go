@@ -289,6 +289,7 @@ type Layer struct {
 	Annotations    map[string]string `yaml:"annotations" json:"annotations,omitempty"`
 	OS             *string           `yaml:"os" json:"os,omitempty"`
 	Arch           *string           `yaml:"arch" json:"arch,omitempty"`
+	Bom            *bool             `yaml:"bom" json:"bom,omitempty"`
 }
 
 func parseLayers(referenceDirectory string, lms yaml.MapSlice, requireHash bool) (map[string]Layer, error) {

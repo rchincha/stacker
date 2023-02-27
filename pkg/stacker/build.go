@@ -533,6 +533,19 @@ func (b *Builder) build(s types.Storage, file string) error {
 
 		log.Infof("filesystem %s built successfully", name)
 
+		// build artifacts such as BOMs, etc
+		if l.Bom != nil && *l.Bom {
+			log.Debugf("generating layer artifacts for %s", name)
+
+			log.Debugf("container state %d", c.State())
+
+			err = GenerateLayerArtifacts(opts.Config, s, l, name)
+			if err != nil {
+				log.Errorf("failed to generate layer artifacts for %s - %v", name, err)
+				return err
+			}
+		}
+
 	}
 
 	return oci.GC(context.Background())
@@ -712,6 +725,20 @@ func SetupLayerConfig(config types.StackerConfig, c *container.Container, l type
 		}
 	} else {
 		log.Debugf("not bind mounting %s into container", importsDir)
+	}
+
+	// make the artifacts path available so that boms can be built from the run directive
+	if l.Bom != nil {
+		artifactsDir := path.Join(config.StackerDir, "artifacts", name)
+		if _, err := os.Stat(artifactsDir); err == nil {
+			log.Debugf("bind mounting %s into container", artifactsDir)
+			err = c.BindMount(artifactsDir, "/stacker-artifacts", "rw")
+			if err != nil {
+				return err
+			}
+		} else {
+			log.Debugf("not bind mounting %s into container", artifactsDir)
+		}
 	}
 
 	for k, v := range env {
