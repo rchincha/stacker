@@ -23,4 +23,6 @@ EOF
     ls -alR .stacker/artifacts/centos
     [ -f .stacker/artifacts/centos/test.sbom ]
     [ -f .stacker/artifacts/centos/libs.spdx ]
+    [ -f .stacker/artifacts/centos/inventory.json ]
+    cat .stacker/artifacts/centos/inventory.json | jq .
 }

@@ -1,9 +1,13 @@
 package lib
 
 import (
+	"encoding/json"
+	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
+	"github.com/minio/sha256-simd"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"sigs.k8s.io/bom/pkg/serialize"
@@ -101,4 +105,75 @@ func GenerateBOM(opts GenerateBOMOpts) error {
 	log.SetOutput(io.Discard)
 	err := generateBOM(&generateOptions{directories: []string{opts.Path}, outputFile: opts.Dest})
 	return err
+}
+
+type Entry struct {
+	Path     string `yaml:"path" json:"path"`
+	Size     int64  `yaml:"size" json:"size"`
+	Checksum string `yaml:"checksum" json:"checksum"`
+	Mode     string `yaml:"mode" json:"mode"`
+}
+
+type Inventory struct {
+	Entries []Entry `yaml:"entries" json:"entries"`
+}
+
+func GenerateFSInventory(root string) error {
+	entries := []Entry{}
+
+	err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+
+		if info.IsDir() &&
+			(path == "/proc" ||
+				path == "/sys" ||
+				path == "/dev") {
+			// exclude/skip these dirs
+			return filepath.SkipDir
+		}
+
+		// skip dirs for generating the inventory
+		if info.IsDir() {
+			return nil
+		}
+
+		entry := Entry{Path: path, Size: info.Size(), Mode: fmt.Sprintf("%#o", info.Mode())}
+
+		// generate checksum
+		if info.Mode().IsRegular() {
+			fh, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer fh.Close()
+
+			hash := sha256.New()
+			if _, err := io.Copy(hash, fh); err != nil {
+				return err
+			}
+
+			entry.Checksum = fmt.Sprintf("sha256:%x", hash.Sum(nil))
+		}
+
+		entries = append(entries, entry)
+
+		return nil
+	})
+
+	if err != nil {
+		return err
+	}
+
+	content, err := json.Marshal(entries)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile("/stacker-artifacts/inventory.json", content, 0640); err != nil {
+		return err
+	}
+
+	return nil
 }

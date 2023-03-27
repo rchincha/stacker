@@ -218,6 +218,10 @@ func doBom(ctx *cli.Context) error {
 		return errors.Errorf("wrong number of args")
 	}
 
+	if err := lib.GenerateFSInventory("/"); err != nil {
+		return err
+	}
+
 	return lib.GenerateBOM(lib.GenerateBOMOpts{
 		Path: ctx.Args().Get(0),
 		Dest: ctx.Args().Get(1),
