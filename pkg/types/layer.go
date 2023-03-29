@@ -373,6 +373,9 @@ func parseLayers(referenceDirectory string, lms yaml.MapSlice, requireHash bool)
 			layer.Arch = &arch
 		}
 
+		bom := true
+		layer.Bom = &bom
+
 		ret[name], err = layer.absolutify(referenceDirectory)
 		if err != nil {
 			return nil, err
