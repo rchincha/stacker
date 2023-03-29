@@ -27,7 +27,7 @@ require (
 	github.com/moby/sys/mountinfo v0.6.0 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.3-0.20211202222133-eacdcc10569b
-	github.com/opencontainers/runc v1.1.2 // indirect
+	github.com/opencontainers/runc v1.1.5 // indirect
 	github.com/opencontainers/umoci v0.4.8-0.20220412065115-12453f247749
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/common v0.32.1 // indirect
