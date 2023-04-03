@@ -393,3 +393,21 @@ EOF
 
     stacker build
 }
+
+@test "import with dir contents" {
+  mkdir folder1
+  touch folder1/file1
+  cat > stacker.yaml <<EOF
+first:
+  from:
+    type: oci
+    url: $CENTOS_OCI
+  import:
+  - path: folder1/
+    dest: /
+  run: |
+    ls -l /
+    [ -f /file1 ]
+EOF
+    stacker build
+}

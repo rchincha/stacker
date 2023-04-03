@@ -125,6 +125,7 @@ func importFile(imp string, cacheDir string, hash string, idest string, mode *fs
 	}
 
 	dest := path.Join(cacheDir, path.Base(imp))
+
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return "", errors.Wrapf(err, "failed making cache dir")
 	}
@@ -156,7 +157,12 @@ func importFile(imp string, cacheDir string, hash string, idest string, mode *fs
 			fallthrough
 		case mtree.Extra:
 			srcpath := path.Join(imp, d.Path())
-			destpath := path.Join(cacheDir, path.Base(imp), d.Path())
+			var destpath string
+			if imp[len(imp)-1:] == "/" {
+				destpath = path.Join(cacheDir, d.Path())
+			} else {
+				destpath = path.Join(cacheDir, path.Base(imp), d.Path())
+			}
 
 			if d.New().IsDir() {
 				fi, err := os.Lstat(destpath)
