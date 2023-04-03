@@ -124,7 +124,12 @@ func importFile(imp string, cacheDir string, hash string, idest string, mode *fs
 		return dest, nil
 	}
 
-	dest := path.Join(cacheDir, path.Base(imp))
+	var dest string
+	if imp[len(imp)-1:] != "/" {
+		dest = path.Join(cacheDir, path.Base(imp))
+	} else {
+		dest = cacheDir
+	}
 
 	if err := os.MkdirAll(dest, 0755); err != nil {
 		return "", errors.Wrapf(err, "failed making cache dir")
@@ -266,7 +271,7 @@ func acquireUrl(c types.StackerConfig, storage types.Storage, i string, cache st
 			return "", err
 		}
 		defer cleanup()
-		err = Grab(c, storage, snap, url.Path, cache, mode, uid, gid)
+		err = Grab(c, storage, snap, url.Path, cache, idest, mode, uid, gid)
 		if err != nil {
 			return "", err
 		}

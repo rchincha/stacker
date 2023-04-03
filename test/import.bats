@@ -390,7 +390,42 @@ eigth:
     [ -f /dir/file2 ]
     [ -f /dir/files/file3 ]
 EOF
+    stacker build
+}
 
+@test "import with dir contents" {
+  mkdir folder1
+  touch folder1/file1
+  cat > stacker.yaml <<EOF
+first:
+  from:
+    type: oci
+    url: $CENTOS_OCI
+  import:
+  - path: folder1/
+    dest: /folder1/
+  run: |
+    [ -f /folder1/file1 ]
+
+second:
+  from:
+    type: oci
+    url: $CENTOS_OCI
+  run: |
+    mkdir /folder1
+    touch /folder1/file1
+    touch /folder1/file2
+
+third:
+  from:
+    type: oci
+    url: $CENTOS_OCI
+  import:
+    - path: stacker://second/folder1/
+      dest: /folder1/
+  run: |
+    [ -f /folder1/file1 ]
+EOF
     stacker build
 }
 

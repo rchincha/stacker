@@ -12,7 +12,7 @@ import (
 )
 
 func Grab(sc types.StackerConfig, storage types.Storage, name string, source string, targetDir string,
-	mode *fs.FileMode, uid, gid int,
+	idest string, mode *fs.FileMode, uid, gid int,
 ) error {
 	c, err := container.New(sc, name)
 	if err != nil {
@@ -41,7 +41,11 @@ func Grab(sc types.StackerConfig, storage types.Storage, name string, source str
 		return err
 	}
 
-	err = c.Execute(fmt.Sprintf("/static-stacker internal-go cp %s /stacker/%s", source, path.Base(source)), nil)
+	if idest == "" || idest[len(idest)-1:] != "/" {
+		err = c.Execute(fmt.Sprintf("/static-stacker internal-go cp %s /stacker/%s", source, path.Base(source)), nil)
+	} else {
+		err = c.Execute(fmt.Sprintf("/static-stacker internal-go cp %s /stacker/%s", source, "/"), nil)
+	}
 	if err != nil {
 		return err
 	}
