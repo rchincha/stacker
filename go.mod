@@ -4,18 +4,23 @@ go 1.16
 
 require (
 	github.com/AdaLogics/go-fuzz-headers v0.0.0-20211102141018-f7be0cbad29c // indirect
+	github.com/Azure/go-ansiterm v0.0.0-20210617225240-d185dfc1b5a1 // indirect
 	github.com/Microsoft/go-winio v0.5.2 // indirect
+	github.com/Microsoft/hcsshim v0.9.2 // indirect
 	github.com/anmitsu/go-shlex v0.0.0-20200514113438-38f4b401e2be
 	github.com/anuvu/squashfs v0.0.0-20220228153512-67c8ca12cbf4
 	github.com/apex/log v1.9.0
+	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/cheggaaa/pb/v3 v3.0.8
-	github.com/containerd/containerd v1.6.1 // indirect
+	github.com/containerd/cgroups v1.0.3 // indirect
 	github.com/containers/image/v5 v5.16.1
 	github.com/containers/libtrust v0.0.0-20200511145503-9c3a6c22cd9a // indirect
 	github.com/docker/distribution v2.8.0+incompatible // indirect
-	github.com/docker/docker v20.10.11+incompatible // indirect
+	github.com/docker/docker v20.10.24+incompatible // indirect
 	github.com/dustin/go-humanize v1.0.0
 	github.com/freddierice/go-losetup v0.0.0-20220331141030-7ad00c49b973
+	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/justincormack/go-memfd v0.0.0-20170219213707-6e4af0518993
 	github.com/klauspost/compress v1.14.4 // indirect
 	github.com/klauspost/pgzip v1.2.5
@@ -25,12 +30,14 @@ require (
 	github.com/minio/sha256-simd v1.0.0
 	github.com/mitchellh/hashstructure v1.1.0
 	github.com/moby/sys/mountinfo v0.6.0 // indirect
+	github.com/moby/term v0.0.0-20210610120745-9d4ed1856297 // indirect
 	github.com/opencontainers/go-digest v1.0.0
 	github.com/opencontainers/image-spec v1.0.3-0.20211202222133-eacdcc10569b
 	github.com/opencontainers/runc v1.1.2 // indirect
 	github.com/opencontainers/umoci v0.4.8-0.20220412065115-12453f247749
 	github.com/pkg/errors v0.9.1
 	github.com/prometheus/common v0.32.1 // indirect
+	github.com/prometheus/procfs v0.7.3 // indirect
 	github.com/smartystreets/assertions v1.0.1 // indirect
 	github.com/smartystreets/goconvey v1.6.4
 	github.com/stretchr/testify v1.7.1
@@ -43,6 +50,7 @@ require (
 	golang.org/x/net v0.0.0-20220225172249-27dd8689420f // indirect
 	golang.org/x/sys v0.0.0-20220227234510-4e6760a101f9
 	golang.org/x/term v0.0.0-20210927222741-03fcf44c2211
+	golang.org/x/time v0.0.0-20210723032227-1f47c861a9ac // indirect
 	google.golang.org/genproto v0.0.0-20220303160752-862486edd9cc // indirect
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.0 // indirect
