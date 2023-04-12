@@ -108,6 +108,8 @@ func validateOverlayDirs(name string, overlayDirs []types.OverlayDir, rootfs str
 		break
 	}
 
+	log.Debugf("overlayDirs: %+v", overlayDirs)
+
 	for ovlindex, ovldir := range overlayDirs {
 		if ovldir.Dest == "" {
 			continue
@@ -116,6 +118,7 @@ func validateOverlayDirs(name string, overlayDirs []types.OverlayDir, rootfs str
 		for i := len(manifest.Layers); i > 0; i-- {
 			layer := manifest.Layers[len(manifest.Layers)-1]
 			contents := overlayPath(rootfs, layer.Digest, "overlay")
+			log.Debugf("contents: %s", contents)
 			if _, err := os.Stat(contents); err != nil {
 				if errors.Is(err, os.ErrNotExist) {
 					continue
@@ -134,7 +137,12 @@ func validateOverlayDirs(name string, overlayDirs []types.OverlayDir, rootfs str
 				return errors.Wrapf(err, "unable to eval symlink %s", dest)
 			}
 
+			log.Debugf("contents: %+v dest: %+v realdest: %+v", contents, dest, realdest)
+
 			overlayDirs[ovlindex].Dest = strings.TrimPrefix(realdest, contents)
+
+			log.Debugf("overlay: %d %+v", ovlindex, overlayDirs[ovlindex])
+
 			if ovldir.Dest != overlayDirs[ovlindex].Dest {
 				log.Infof("overlay dest %s is a symlink, patching to %s", ovldir.Dest, overlayDirs[ovlindex].Dest)
 				break
