@@ -1,29 +1,47 @@
 ## The `stacker.yaml` file
 
 When doing a `stacker build`, the behavior of stacker is specified by the yaml
-directives below. In addition to these, stacker allows variable substitions of
-several forms. For example, a line like:
+directives below. 
 
-    $ONE ${{TWO}} ${{THREE:3}}
+Before the yaml is parsed, stacker performs substitution on placeholders in the
+file of the format `${{VAR}}` or `${{VAR:default}}`. For example, a line like:
 
-When run with `stacker build --substitute ONE=1 --substitute TWO=2` is
+    ${{ONE}} ${{TWO:3}}
+
+When run with `stacker build --substitute ONE=1` is
 processed in stacker as:
 
-    1 2 3
+    1 3
 
-That is, variables of the form `$FOO` or `${FOO}` are supported, and variables
-with `${FOO:default}` a default value will evaluate to their default if not
-specified on the command line. It is an error to specify a `${FOO}` style
-without a default; to make the default an empty string, use `${FOO:}`.
+In order to avoid conflict with bash or POSIX shells in the `run` section, 
+only placeholders with two braces are supported, e.g. `${{FOO}}`.
+Placeholders with a default value like `${{FOO:default}}` will evaluate to their default if not
+specified on the command line or in a substitution file.
 
-In addition to substitutions provided on the command line, the following
-variables are also available with their values from either command
+Using a `${{FOO}}` placeholder without a default will result in an error if
+there is no substitution provided. If you want an empty string in that case, use
+an empty default: `${{FOO:}}`.
+
+In order to avoid confusion, it is also an error if a placeholder in the shell
+style (`$FOO` or `${FOO}`) is found when the same key has been provided as a
+substitution either via the command line (e.g. `--substitute FOO=bar`) or in a
+substitution file. An error will be printed that explains how to rewrite it:
+
+   error "A=B" was provided as a substitution and unsupported placeholder "${A}" was found. Replace "${A}" with "${{A}}" to use the substitution.
+
+Substitutions can also be specified in a yaml file given with the argument
+`--substitute-file`, with any number of key: value pairs:
+
+    FOO: bar
+    BAZ: bat
+
+In addition to substitutions provided on the command line or a file, the
+following variables are also available with their values from either command
 line flags or stacker-config file.
 
     STACKER_STACKER_DIR config name 'stacker_dir', cli flag '--stacker-dir'-
     STACKER_ROOTFS_DIR  config name 'rootfs_dir', cli flag '--roots-dir'
     STACKER_OCI_DIR     config name 'oci_dir', cli flag '--oci-dir'
-
 
 The stacker build environment will have the following environment variables
 available for reference:
@@ -55,18 +73,19 @@ Hub.
 
 `tar`: `url` is required, everything else is ignored.
 
-`oci`: `url` is required, of the form `path:tag`. This uses the OCI image at
-`url` (which may be a local path).
+`oci`: `url` is required, and must be a local OCI layout URI of the form `oci:/local/path/image:tag`
 
 `built`: `tag` is required, everything else is ignored. `built` bases this
 layer on a previously specified layer in the stacker file.
 
-`scratch`: which is an empty rootfs and can be used to host statically built binaries.
+`scratch`: the base image is an empty rootfs, and can be used with the `dest` field
+of `import` to generate minimal images, e.g. for statically built binaries.
 
-### `import`
 
-The `import` directive describes what files should be made available in
-`/stacker` during the `run` phase. There are three forms of importing supported
+### `imports`
+
+The `imports` directive describes what files should be made available in
+`/stacker/imports` during the `run` phase. There are three forms of importing supported
 today:
 
     /path/to/file
@@ -88,10 +107,10 @@ Will grab /path/to/file from the previously built layer `$name`.
 
 #### `import hash`
 
-The `import` directive also supports specifying the hash(sha256sum) of import source,
-for all the three forms presented above, for example:
+Each entry in the `imports' directive also supports specifying the hash(sha256sum) of
+import source, for all the three forms presented above, for example:
 ```
-import:
+imports:
   - path: config.json
     hash: f55af805b012017bc....
   - path: http://example.com/foo.tar.gz
@@ -114,7 +133,7 @@ If `--require-hash` is not passed, this import mode can be combined with uncheck
 and only files which have the hash specified will be checked.
 
 ```
-import:
+imports:
   - path: "config.json
     hash: "BEEFcafeaaaaAAAA...."
   - /path/to/file
@@ -126,10 +145,18 @@ The `import` directive also supports specifying the destination path (specified
 by `dest`) in the resulting container image, where the source file (specified
 by `path`) will be copyied to, for example:
 ```
-import:
+imports:
   - path: config.json
     dest: /
 ```
+
+
+### (Deprecated) `import`
+The deprecated `import` directive works like `imports` except that
+the entries in the `import` array will be placed into `/stacker/` rather
+than `/stacker/imports`.
+
+See https://github.com/project-stacker/stacker/issues/571 for timeline and migration info.
 
 ### `overlay_dirs`
 This directive works only with OverlayFS backend storage.
@@ -149,13 +176,17 @@ to be available under container's /usr/local/ and all the files/dirs from the ho
 /path/to/directory2 to be available under container's /
 
 
-### `environment`, `labels`, `working_dir`, `volumes`, `cmd`, `entrypoint`, `user`
+### `environment`, `labels`, `working_dir`, `volumes`, `cmd`, `entrypoint`
 
 These all correspond exactly to the similarly named bits in the [OCI image
 config
 spec](https://github.com/opencontainers/image-spec/blob/master/config.md#properties),
 and are available for users to pass things through to the runtime environment
 of the image.
+
+### `runtime_user`
+
+This sets the `user` field in the container config, as defined in the [OCI Image config spec](https://github.com/opencontainers/image-spec/blob/master/config.md#properties). 
 
 ### `generate_labels`
 
@@ -201,14 +232,16 @@ not include all of its build dependencies.
 
 ### `binds`
 
-`binds`: specifies bind mounts from the host to the container. There are two formats:
+`binds`: specifies bind mounts from the host to the container. There are three formats:
 
     binds:
+        - /zomg
         - /foo/bar -> /bar/baz
-	- /zomg
+        - source: /foo/bar
+          dest: /bar/baz
 
-The first one binds /foo/bar to /bar/baz, and the second host /zomg to
-container /zomg.
+The first one binds host `/zomg` to container `/zomg` while the second and third
+bind host `/foo/bar` to container `/bar/baz`.
 
 Right now there is no awareness of change for any of these bind mounts, so
 --no-cache should be used to re-build if the content of the bind mount has

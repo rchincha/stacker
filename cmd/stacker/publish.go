@@ -3,8 +3,8 @@ package main
 import (
 	"github.com/pkg/errors"
 	cli "github.com/urfave/cli/v2"
+	"machinerun.io/atomfs/squashfs"
 	"stackerbuild.io/stacker/pkg/lib"
-	"stackerbuild.io/stacker/pkg/squashfs"
 	"stackerbuild.io/stacker/pkg/stacker"
 	"stackerbuild.io/stacker/pkg/types"
 )
@@ -73,8 +73,8 @@ var publishCmd = cli.Command{
 			Value: cli.NewStringSlice("tar"),
 		},
 		&cli.StringSliceFlag{
-			Name:  "layer",
-			Usage: "layer to be published; can be specified multiple times",
+			Name:  "image",
+			Usage: "specific image to be published when a stacker file has many images; can be specified multiple times",
 		},
 	},
 	Before: beforePublish,
@@ -127,7 +127,7 @@ func doPublish(ctx *cli.Context) error {
 		Progress:       shouldShowProgress(ctx),
 		SkipTLS:        ctx.Bool("skip-tls"),
 		LayerTypes:     layerTypes,
-		Layers:         ctx.StringSlice("layer"),
+		Images:         ctx.StringSlice("image"),
 	}
 
 	var stackerFiles []string

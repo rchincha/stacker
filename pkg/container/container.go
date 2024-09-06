@@ -65,6 +65,9 @@ func New(sc types.StackerConfig, name string) (*Container, error) {
 func (c *Container) BindMount(source string, dest string, extraOpts string) error {
 	createOpt := "create=dir"
 	stat, err := os.Stat(source)
+	if os.IsNotExist(err) {
+		return errors.Errorf("bind mount source %q does not exist, refusing bind mount: %s", source, err)
+	}
 	if err == nil && !stat.IsDir() {
 		createOpt = "create=file"
 	}
@@ -113,16 +116,12 @@ func (c *Container) containerError(theErr error, msg string) error {
 	}
 
 	for _, err := range lxcErrors {
-		log.Debugf(err)
+		log.Debugf("%s", err)
 	}
-	return errors.Wrapf(theErr, msg)
+	return errors.Wrap(theErr, msg)
 }
 
-func (c *Container) Execute(args string, stdin io.Reader) error {
-	if err := c.SetConfig("lxc.execute.cmd", args); err != nil {
-		return err
-	}
-
+func (c *Container) Execute(args []string, stdin io.Reader) error {
 	f, err := os.CreateTemp("", fmt.Sprintf("stacker_%s_run", c.c.Name()))
 	if err != nil {
 		return err
@@ -142,10 +141,7 @@ func (c *Container) Execute(args string, stdin io.Reader) error {
 	cmd, cleanup, err := embed_exec.GetCommand(
 		c.sc.EmbeddedFS,
 		"lxc-wrapper/lxc-wrapper",
-		"spawn",
-		c.c.Name(),
-		c.sc.RootFSDir,
-		f.Name(),
+		append([]string{"spawn", c.c.Name(), c.sc.RootFSDir, f.Name()}, args...)...,
 	)
 	if err != nil {
 		return err

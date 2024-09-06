@@ -10,11 +10,11 @@ function setup() {
     # Need to separate layer download from the download of the test file for imports
     # As we want to be able to have network for base image download
     # in img/stacker1.yaml but disconnect the network for test file download
-    cat > img/stacker1.yaml <<EOF
-centos_base:
+    cat > img/stacker1.yaml <<"EOF"
+busybox_base:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         ls
 EOF
@@ -22,8 +22,8 @@ EOF
 img:
     from:
         type: oci
-        url: $(pwd)/oci:centos_base
-    import:
+        url: $(pwd)/oci:busybox_base
+    imports:
         - http://network-test.debian.org/nm
     run: |
         cp /stacker/imports/nm /root/nm
@@ -42,7 +42,7 @@ function teardown() {
     require_privilege priv
 
     # Build base image
-    stacker build -f img/stacker1.yaml
+    stacker build -f img/stacker1.yaml --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci ls --layout oci
     # First execution creates the cache
     stacker build -f img/stacker2.yaml
@@ -60,7 +60,7 @@ function teardown() {
 
 @test "importing cached file from http url with matching length" {
     # Build base image
-    stacker build -f img/stacker1.yaml
+    stacker build -f img/stacker1.yaml --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci ls --layout oci
     # First execution creates the cache
     stacker build -f img/stacker2.yaml
@@ -74,12 +74,12 @@ function teardown() {
 }
 
 @test "importing to a dest" {
-    cat > img/stacker1.yaml <<EOF
-centos_base:
+    cat > img/stacker1.yaml <<"EOF"
+busybox_base:
     from:
         type: oci
-        url: $CENTOS_OCI
-    import:
+        url: ${{BUSYBOX_OCI}}
+    imports:
         - path: https://www.cisco.com/favicon.ico
           dest: /dest/icon
     run: |
@@ -88,7 +88,7 @@ centos_base:
         [ ! -f /stacker/favicon.ico ]
 EOF
     # Build base image
-    stacker build -f img/stacker1.yaml
+    stacker build -f img/stacker1.yaml --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci ls --layout oci
 }
 

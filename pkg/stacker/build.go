@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/user"
 	"path"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,11 +18,15 @@ import (
 	"github.com/pkg/errors"
 	"gopkg.in/yaml.v2"
 	"stackerbuild.io/stacker/pkg/container"
+	"stackerbuild.io/stacker/pkg/lib"
 	"stackerbuild.io/stacker/pkg/log"
+	"stackerbuild.io/stacker/pkg/test"
 	"stackerbuild.io/stacker/pkg/types"
 )
 
-const DefaultShell = "/bin/sh"
+const (
+	DefaultShell = "/bin/sh"
+)
 
 type BuildArgs struct {
 	Config               types.StackerConfig
@@ -36,6 +41,8 @@ type BuildArgs struct {
 	SetupOnly            bool
 	Progress             bool
 	AnnotationsNamespace string
+	Username             string
+	Password             string
 }
 
 // Builder is responsible for building the layers based on stackerfiles
@@ -111,6 +118,11 @@ func (b *Builder) updateOCIConfigForOutput(sf *types.Stackerfile, s types.Storag
 		imageConfig.Labels = map[string]string{}
 	}
 
+	inDir := types.InternalStackerDir
+	if l.WasLegacyImport {
+		inDir = types.LegacyInternalStackerDir
+	}
+
 	if len(l.GenerateLabels) > 0 {
 		writable, cleanup, err := s.TemporaryWritableSnapshot(name)
 		if err != nil {
@@ -130,24 +142,26 @@ func (b *Builder) updateOCIConfigForOutput(sf *types.Stackerfile, s types.Storag
 		}
 		defer c.Close()
 
-		err = SetupBuildContainerConfig(opts.Config, s, c, writable)
+		err = SetupBuildContainerConfig(opts.Config, s, c, inDir, writable)
 		if err != nil {
 			return err
 		}
 
-		err = c.BindMount(dir, "/stacker/oci-labels", "")
+		// /stacker/oci-labels
+		labelInDir := filepath.Join(inDir, "oci-labels")
+		const script = ".stacker-run.sh"
+		err = c.BindMount(dir, labelInDir, "")
 		if err != nil {
 			return err
 		}
 
-		rootfs := path.Join(opts.Config.RootFSDir, writable, "rootfs")
-		runPath := path.Join(dir, ".stacker-run.sh")
-		err = generateShellForRunning(rootfs, l.GenerateLabels, runPath)
+		rootfs := filepath.Join(opts.Config.RootFSDir, writable, "rootfs")
+		err = generateShellForRunning(rootfs, l.GenerateLabels, filepath.Join(dir, script))
 		if err != nil {
 			return err
 		}
 
-		err = c.Execute("/stacker/oci-labels/.stacker-run.sh", nil)
+		err = c.Execute([]string{filepath.Join(labelInDir, script)}, nil)
 		if err != nil {
 			return err
 		}
@@ -162,7 +176,7 @@ func (b *Builder) updateOCIConfigForOutput(sf *types.Stackerfile, s types.Storag
 				continue
 			}
 
-			content, err := os.ReadFile(path.Join(dir, ent.Name()))
+			content, err := os.ReadFile(filepath.Join(dir, ent.Name()))
 			if err != nil {
 				return errors.Wrapf(err, "couldn't read label %s", ent.Name())
 			}
@@ -270,6 +284,7 @@ func (b *Builder) updateOCIConfigForOutput(sf *types.Stackerfile, s types.Storag
 	}
 
 	annotations[getStackerContentsAnnotation(opts.AnnotationsNamespace)] = sf.AfterSubstitutions
+	annotations[getStackerVersionAnnotation(opts.AnnotationsNamespace)] = lib.StackerVersion
 
 	history := ispec.History{
 		EmptyLayer: true, // this is only the history for imageConfig edit
@@ -358,6 +373,12 @@ func (b *Builder) build(s types.Storage, file string) error {
 		}
 
 		log.Infof("preparing image %s...", name)
+		inDir := types.InternalStackerDir
+		if l.WasLegacyImport {
+			log.Debugf("image %s uses legacy import syntax, will also mount imports at %s",
+				name, types.LegacyInternalStackerDir)
+			inDir = types.LegacyInternalStackerDir
+		}
 
 		// We need to run the imports first since we now compare
 		// against imports for caching layers. Since we don't do
@@ -447,18 +468,18 @@ func (b *Builder) build(s types.Storage, file string) error {
 		}
 		defer c.Close()
 
-		err = SetupBuildContainerConfig(opts.Config, s, c, name)
+		err = SetupBuildContainerConfig(opts.Config, s, c, inDir, name)
 		if err != nil {
 			return err
 		}
 
-		err = SetupLayerConfig(opts.Config, c, l, name)
+		err = SetupLayerConfig(opts.Config, c, l, inDir, name)
 		if err != nil {
 			return err
 		}
 
 		if opts.SetupOnly {
-			err = c.SaveConfigFile(path.Join(opts.Config.RootFSDir, name, "lxc.conf"))
+			err = c.SaveConfigFile(filepath.Join(opts.Config.RootFSDir, name, "lxc.conf"))
 			if err != nil {
 				return errors.Wrapf(err, "error saving config file for %s", name)
 			}
@@ -468,23 +489,47 @@ func (b *Builder) build(s types.Storage, file string) error {
 		}
 
 		if len(l.Run) != 0 {
-			rootfs := path.Join(opts.Config.RootFSDir, name, "rootfs")
-			shellScript := path.Join(opts.Config.StackerDir, "imports", name, ".stacker-run.sh")
+			rootfs := filepath.Join(opts.Config.RootFSDir, name, "rootfs")
+			shellScript := filepath.Join(opts.Config.StackerDir, "imports", name, ".stacker-run.sh")
 			err = generateShellForRunning(rootfs, l.Run, shellScript)
 			if err != nil {
 				return err
 			}
 
 			// These should all be non-interactive; let's ensure that.
-			err = c.Execute("/stacker/imports/.stacker-run.sh", nil)
+			err = c.Execute([]string{filepath.Join(inDir, "imports", ".stacker-run.sh")}, nil)
 			if err != nil {
 				if opts.OnRunFailure != "" {
-					err2 := c.Execute(opts.OnRunFailure, os.Stdin)
+					err2 := c.Execute([]string{opts.OnRunFailure}, os.Stdin)
 					if err2 != nil {
 						log.Infof("failed executing %s: %s\n", opts.OnRunFailure, err2)
 					}
 				}
 				return errors.Errorf("run commands failed: %s", err)
+			}
+		}
+
+		// build artifacts such as BOMs, etc
+		if l.Bom != nil && l.Bom.Generate {
+			log.Debugf("generating layer artifacts for %s", name)
+
+			if err := ImportArtifacts(opts.Config, l.From, name); err != nil {
+				log.Errorf("unable to import previously built artifacts, err:%v", err)
+				return err
+			}
+
+			for _, pkg := range l.Bom.Packages {
+				if err := BuildLayerArtifacts(opts.Config, s, l, name, pkg); err != nil {
+					log.Errorf("failed to generate layer artifacts for %s - %v", name, err)
+					return err
+				}
+			}
+
+			if err := VerifyLayerArtifacts(opts.Config, s, l, name); err != nil {
+				log.Errorf("failed to validate layer artifacts for %s - %v", name, err)
+				// the generated bom is invalid, remove it so we don't publish it and also get a cache miss for rebuilds
+				_ = os.Remove(path.Join(opts.Config.StackerDir, "artifacts", name, fmt.Sprintf("%s.json", name)))
+				return err
 			}
 		}
 
@@ -506,7 +551,7 @@ func (b *Builder) build(s types.Storage, file string) error {
 			continue
 		}
 
-		err = s.Repack(name, opts.LayerTypes, b.builtStackerfiles)
+		err = s.Repack(name, l, opts.LayerTypes, b.builtStackerfiles)
 		if err != nil {
 			return err
 		}
@@ -533,29 +578,6 @@ func (b *Builder) build(s types.Storage, file string) error {
 
 		log.Infof("filesystem %s built successfully", name)
 
-		// build artifacts such as BOMs, etc
-		if l.Bom != nil && l.Bom.Generate {
-			log.Debugf("generating layer artifacts for %s", name)
-
-			if err := ImportArtifacts(opts.Config, l.From, name); err != nil {
-				log.Errorf("unable to import previously built artifacts, err:%v", err)
-				return err
-			}
-
-			for _, pkg := range l.Bom.Packages {
-				if err := BuildLayerArtifacts(opts.Config, s, l, name, pkg); err != nil {
-					log.Errorf("failed to generate layer artifacts for %s - %v", name, err)
-					return err
-				}
-			}
-
-			if err := VerifyLayerArtifacts(opts.Config, s, l, name); err != nil {
-				log.Errorf("failed to validate layer artifacts for %s - %v", name, err)
-				// the generated bom is invalid, remove it so we don't publish it and also get a cache miss for rebuilds
-				_ = os.Remove(path.Join(opts.Config.StackerDir, "artifacts", name, fmt.Sprintf("%s.json", name)))
-				return err
-			}
-		}
 	}
 
 	return oci.GC(context.Background())
@@ -635,7 +657,6 @@ func runInternalGoSubcommand(config types.StackerConfig, args []string) error {
 		"--roots-dir", config.RootFSDir,
 		"--stacker-dir", config.StackerDir,
 		"--storage-type", config.StorageType,
-		"--internal-userns",
 	}
 
 	if config.Debug {
@@ -652,7 +673,7 @@ func runInternalGoSubcommand(config types.StackerConfig, args []string) error {
 	return errors.WithStack(c.Run())
 }
 
-func SetupBuildContainerConfig(config types.StackerConfig, storage types.Storage, c *container.Container, name string) error {
+func SetupBuildContainerConfig(config types.StackerConfig, storage types.Storage, c *container.Container, inDir string, name string) error {
 	rootfsPivot := path.Join(config.StackerDir, "rootfsPivot")
 	if err := os.MkdirAll(rootfsPivot, 0755); err != nil {
 		return err
@@ -685,6 +706,35 @@ func SetupBuildContainerConfig(config types.StackerConfig, storage types.Storage
 	err = c.BindMount("/etc/resolv.conf", "/etc/resolv.conf", "")
 	if err != nil {
 		return err
+	}
+
+	binary, err := os.Readlink("/proc/self/exe")
+	if err != nil {
+		return err
+	}
+
+	// make stacker binary available inside container
+	if err := c.BindMount(binary, filepath.Join(inDir, "bin/stacker"), ""); err != nil {
+		return err
+	}
+
+	// code coverage from inside the container
+	if test.IsCoverageEnabled() {
+		log.Infof("coverage enabled")
+
+		if test.GetCoverageDir() != test.CoverageBindPath {
+			err := c.BindMount(test.GetCoverageDir(), test.CoverageBindPath, "rw")
+			if err != nil {
+				return err
+			}
+
+			log.Debugf("bind mounting %s into container", test.GetCoverageDir())
+		}
+
+		err = c.SetConfig("lxc.environment", fmt.Sprintf("GOCOVERDIR=%s", test.CoverageBindPath))
+		if err != nil {
+			return err
+		}
 	}
 
 	rootfs, err := storage.GetLXCRootfsConfig(name)
@@ -720,7 +770,7 @@ func SetupBuildContainerConfig(config types.StackerConfig, storage types.Storage
 	return nil
 }
 
-func SetupLayerConfig(config types.StackerConfig, c *container.Container, l types.Layer, name string) error {
+func SetupLayerConfig(config types.StackerConfig, c *container.Container, l types.Layer, inDir, name string) error {
 	env, err := l.BuildEnvironment(name)
 	if err != nil {
 		return err
@@ -728,10 +778,18 @@ func SetupLayerConfig(config types.StackerConfig, c *container.Container, l type
 
 	importsDir := path.Join(config.StackerDir, "imports", name)
 	if _, err := os.Stat(importsDir); err == nil {
-		log.Debugf("bind mounting %s into container", importsDir)
-		err = c.BindMount(importsDir, "/stacker/imports", "ro")
+		d := filepath.Join(inDir, "imports")
+		log.Debugf("bind mounting %s into container at %s", importsDir, d)
+		err = c.BindMount(importsDir, d, "ro")
 		if err != nil {
 			return err
+		}
+		// legacy expect imports in /stacker
+		if inDir == types.LegacyInternalStackerDir {
+			err = c.BindMount(importsDir, types.InternalStackerDir, "ro")
+			if err != nil {
+				return err
+			}
 		}
 	} else {
 		log.Debugf("not bind mounting %s into container", importsDir)
@@ -741,27 +799,15 @@ func SetupLayerConfig(config types.StackerConfig, c *container.Container, l type
 	if l.Bom != nil {
 		artifactsDir := path.Join(config.StackerDir, "artifacts", name)
 		if _, err := os.Stat(artifactsDir); err == nil {
-			log.Debugf("bind mounting %s into container", artifactsDir)
-			err = c.BindMount(artifactsDir, "/stacker/artifacts", "rw")
+			d := filepath.Join(inDir, "artifacts")
+			log.Debugf("bind mounting %s dir into container at %s", artifactsDir, d)
+			err = c.BindMount(artifactsDir, d, "rw")
 			if err != nil {
 				return err
 			}
 		} else {
 			log.Debugf("not bind mounting %s into container", artifactsDir)
 		}
-
-		// make stacker also available to run the internal bom cmds
-		binary, err := os.Readlink("/proc/self/exe")
-		if err != nil {
-			return errors.Wrapf(err, "couldn't find executable for bind mount")
-		}
-
-		err = c.BindMount(binary, "/stacker/tools/static-stacker", "")
-		if err != nil {
-			return err
-		}
-
-		log.Debugf("bind mounting %s into container", binary)
 	}
 
 	for k, v := range env {
@@ -774,9 +820,10 @@ func SetupLayerConfig(config types.StackerConfig, c *container.Container, l type
 	}
 
 	for _, bind := range l.Binds {
+		log.Debugf("bind mounting %q into container at %q", bind.Source, bind.Dest)
 		err = c.BindMount(bind.Source, bind.Dest, "")
 		if err != nil {
-			return err
+			return errors.Errorf("failed to bind mount %q at %q: %s", bind.Source, bind.Dest, err)
 		}
 	}
 

@@ -13,7 +13,7 @@ function teardown() {
 build:
     from:
         type: docker
-        url: docker://ubuntu:latest
+        url: oci:${UBUNTU_OCI}
     run: |
         touch /tmp/first
         touch /tmp/second
@@ -27,7 +27,7 @@ contents2:
     from:
         type: built
         tag: build
-    import:
+    imports:
         - stacker://contents/first
         - stacker://contents/second
     run: |

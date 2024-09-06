@@ -3,15 +3,15 @@ package overlay
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
+	"io/fs"
 	"os"
 	"path"
 
 	ispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/opencontainers/umoci/oci/casext"
 	"github.com/pkg/errors"
+	stackeroci "machinerun.io/atomfs/oci"
 	"stackerbuild.io/stacker/pkg/log"
-	stackeroci "stackerbuild.io/stacker/pkg/oci"
 	"stackerbuild.io/stacker/pkg/types"
 )
 
@@ -118,7 +118,15 @@ func (ovl overlayMetadata) lxcRootfsString(config types.StackerConfig, tag strin
 	for _, layer := range manifest.Layers {
 		contents := overlayPath(config.RootFSDir, layer.Digest, "overlay")
 		if _, err := os.Stat(contents); err != nil {
-			return "", errors.Wrapf(err, "%s does not exist", contents)
+			if errors.Is(err, fs.ErrNotExist) {
+				// some docker layers may be empty tars, so ignore these
+				// https://github.com/moby/moby/issues/20917#issuecomment-191901912
+				log.Warnf("%s skipping empty tar layer", layer.Digest)
+
+				continue
+			}
+
+			return "", errors.Wrapf(err, "%s unable to stat", contents)
 		}
 		lowerdirs = append(lowerdirs, contents)
 	}
@@ -139,17 +147,17 @@ func (ovl overlayMetadata) lxcRootfsString(config types.StackerConfig, tag strin
 		lowerdirs = append(lowerdirs, contents)
 	}
 
-	// overlayfs doesn't work with < 2 lowerdirs, so we add some
-	// workaround dirs if necessary (if e.g. the source only has
-	// one layer, or it's an empty rootfs with no layers, we still
-	// want an overlay mount to keep things consistent)
-	for i := 0; i < 2-len(lowerdirs); i++ {
-		workaround := path.Join(config.RootFSDir, tag, fmt.Sprintf("workaround%d", i))
+	// lxc.rootfs.path overlay string is of form
+	//  'overlayfs:lowerdir[:lowerdir2:lowerdir3...]:upperdir'
+	// 1 or more lowerdir and 1 upperdir are required.
+	// In the case of an empty rootfs with no layers there would be no
+	// lowerdirs but want an overlay mount to keep things consistent.
+	if len(lowerdirs) == 0 {
+		workaround := path.Join(config.RootFSDir, tag, "workaround")
 		err := os.MkdirAll(workaround, 0755)
 		if err != nil {
 			return "", errors.Wrapf(err, "couldn't make workaround dir")
 		}
-
 		lowerdirs = append(lowerdirs, workaround)
 	}
 
@@ -169,6 +177,7 @@ func (ovl overlayMetadata) lxcRootfsString(config types.StackerConfig, tag strin
 
 	overlayArgs.WriteString(":")
 
+	// the upperdir is the final token in an 'overlayfs:' lxc.rootfs.path string
 	overlayArgs.WriteString(path.Join(config.RootFSDir, tag, "overlay"))
 
 	log.Debugf("lxc rootfs overlay arg %s", overlayArgs.String())

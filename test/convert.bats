@@ -42,15 +42,13 @@ EOF
   if [ -z "${REGISTRY_URL}" ]; then
     skip "test because no registry found in REGISTRY_URL env variable"
   fi
-  stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=app --skip-tls --url docker://${REGISTRY_URL} --layer app --tag latest
+  stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=app --skip-tls --url docker://${REGISTRY_URL} --image app --tag latest
   rm -f stacker.yaml stacker-subs.yaml
   stacker clean
 }
 
 @test "alpine" {
-  if [ -z "${SLOW_TEST}" ]; then
-    skip "test since slow tests are not enabled"
-  fi
+  skip_slow_test
   git clone https://github.com/alpinelinux/docker-alpine.git
   chmod -R a+rwx docker-alpine
   cd docker-alpine
@@ -58,39 +56,35 @@ EOF
   stacker convert --docker-file Dockerfile --output-file stacker.yaml --substitute-file stacker-subs.yaml
   stacker build -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=alpine --substitute STACKER_VOL1="$TEMPDIR"
   if [ -nz "${REGISTRY_URL}" ]; then
-    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=alpine --substitute STACKER_VOL1="$TEMPDIR" --skip-tls --url docker://${REGISTRY_URL} --layer alpine --tag latest
+    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=alpine --substitute STACKER_VOL1="$TEMPDIR" --skip-tls --url docker://${REGISTRY_URL} --image alpine --tag latest
   fi
   rm -f stacker.yaml stacker-subs.yaml
   stacker clean
 }
 
 @test "elasticsearch" {
-  if [ -z "${SLOW_TEST}" ]; then
-    skip "test since slow tests are not enabled"
-  fi
+  skip_slow_test
   git clone https://github.com/elastic/dockerfiles.git
   chmod -R a+rwx dockerfiles
   cd dockerfiles/elasticsearch
   stacker convert --docker-file Dockerfile --output-file stacker.yaml --substitute-file stacker-subs.yaml
   stacker build -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=elasticsearch
   if [ -nz "${REGISTRY_URL}" ]; then
-    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=elasticsearch --skip-tls --url docker://${REGISTRY_URL} --layer elasticsearch --tag latest
+    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=elasticsearch --skip-tls --url docker://${REGISTRY_URL} --image elasticsearch --tag latest
   fi
   rm -f stacker.yaml stacker-subs.yaml
   stacker clean
 }
 
 @test "python" {
-  if [ -z "${SLOW_TEST}" ]; then
-    skip "test since slow tests are not enabled"
-  fi
+  skip_slow_test
   git clone https://github.com/docker-library/python.git
-  cd python/3.11/alpine3.17
+  cd python/3.11/alpine3.19
   chmod -R a+rw .
   stacker convert --docker-file Dockerfile --output-file stacker.yaml --substitute-file stacker-subs.yaml
   stacker build -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=python
   if [ -nz "${REGISTRY_URL}" ]; then
-    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=python --skip-tls --url docker://${REGISTRY_URL} --layer python --tag latest
+    stacker publish -f stacker.yaml --substitute-file stacker-subs.yaml --substitute IMAGE=python --skip-tls --url docker://${REGISTRY_URL} --image python --tag latest
   fi
   rm -f stacker.yaml stacker-subs.yaml
   stacker clean

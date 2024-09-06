@@ -1,7 +1,6 @@
 package main
 
 import (
-	"embed"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,18 +17,14 @@ import (
 	"golang.org/x/term"
 	"gopkg.in/yaml.v2"
 	"stackerbuild.io/stacker/pkg/container"
+	"stackerbuild.io/stacker/pkg/lib"
 	stackerlog "stackerbuild.io/stacker/pkg/log"
 	"stackerbuild.io/stacker/pkg/types"
 )
 
 var (
-	config      types.StackerConfig
-	version     = ""
-	lxc_version = ""
+	config types.StackerConfig
 )
-
-//go:embed lxc-wrapper/lxc-wrapper
-var embeddedFS embed.FS
 
 func shouldShowProgress(ctx *cli.Context) bool {
 	/* if the user provided explicit recommendations, follow those */
@@ -66,22 +61,27 @@ func stackerResult(err error) {
 }
 
 func shouldSkipInternalUserns(ctx *cli.Context) bool {
-	args := ctx.Args()
-	if args.Len() >= 1 && args.Get(0) == "unpriv-setup" {
+	if ctx.Args().Len() < 1 {
+		// no subcommand, no need for namespace
 		return true
 	}
+	arg0 := ctx.Args().Get(0)
 
-	if args.Len() >= 2 && args.Get(0) == "internal-go" {
-		if args.Get(1) == "atomfs" || args.Get(1) == "cp" || args.Get(1) == "chown" || args.Get(1) == "chmod" ||
-			args.Get(1) == "bom-discover" || args.Get(1) == "bom-build" || args.Get(1) == "bom-verify" {
-			return true
-		}
+	if arg0 == "internal-go" && ctx.Args().Get(1) == "testsuite-check-overlay" {
+		return false
+	}
+
+	if arg0 == "bom" || arg0 == "unpriv-setup" || arg0 == "internal-go" {
+		return true
 	}
 
 	return false
 }
 
 func main() {
+	if !hasEmbedded {
+		panic("stacker was built without embedded binaries.")
+	}
 	sigquits := make(chan os.Signal, 1)
 	go func() {
 		for range sigquits {
@@ -93,7 +93,7 @@ func main() {
 	app := cli.NewApp()
 	app.Name = "stacker"
 	app.Usage = "stacker builds OCI images"
-	app.Version = fmt.Sprintf("stacker %s liblxc %s", version, lxc_version)
+	app.Version = fmt.Sprintf("stacker %s liblxc %s", lib.StackerVersion, lib.LXCVersion)
 
 	configDir := os.Getenv("XDG_CONFIG_HOME")
 	if configDir == "" {
@@ -108,6 +108,7 @@ func main() {
 
 	app.Commands = []*cli.Command{
 		&buildCmd,
+		&bomCmd,
 		&recursiveBuildCmd,
 		&convertCmd,
 		&publishCmd,
@@ -120,6 +121,8 @@ func main() {
 		&gcCmd,
 		&checkCmd,
 	}
+
+	app.DisableSliceFlagSeparator = true
 
 	app.Flags = []cli.Flag{
 		&cli.StringFlag{
@@ -305,7 +308,7 @@ func main() {
 		}
 
 		stackerlog.FilterNonStackerLogs(handler, logLevel)
-		stackerlog.Debugf("stacker version %s", version)
+		stackerlog.Debugf("stacker version %s", lib.StackerVersion)
 
 		if !ctx.Bool("internal-userns") && !shouldSkipInternalUserns(ctx) && len(os.Args) > 1 {
 			binary, err := os.Readlink("/proc/self/exe")

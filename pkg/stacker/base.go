@@ -40,13 +40,21 @@ func GetBase(o BaseLayerOpts) error {
 			return err
 		}
 
-		_, err := acquireUrl(o.Config, o.Storage, o.Layer.From.Url, cacheDir, "", "", nil, -1, -1, o.Progress)
+		_, _, err := acquireUrl(o.Config, o.Storage, o.Layer.From.Url, cacheDir, "", "", nil, -1, -1, o.Progress)
 		return err
 	/* now we can do all the containers/image types */
 	case types.OCILayer:
 		fallthrough
 	case types.DockerLayer:
-		return importContainersImage(o.Layer.From, o.Config, o.Progress)
+		err := importContainersImage(o.Layer.From, o.Config, o.Progress)
+		if o.Layer.Bom != nil && o.Layer.Bom.Generate && (o.Layer.From.Type == types.DockerLayer) {
+			bomPath := path.Join(o.Config.StackerDir, "artifacts", o.Name)
+			err = getArtifact(bomPath, "application/spdx+json", o.Layer.From.Url, "", "", o.Layer.From.Insecure)
+			if err != nil {
+				log.Errorf("sbom for image %s not found", o.Layer.From.Url)
+			}
+		}
+		return err
 	default:
 		return errors.Errorf("unknown layer type: %v", o.Layer.From.Type)
 	}
@@ -87,7 +95,11 @@ func SetupRootfs(o BaseLayerOpts) error {
 	case types.OCILayer:
 		fallthrough
 	case types.DockerLayer:
-		return setupContainersImageRootfs(o)
+		err := setupContainersImageRootfs(o)
+		if err != nil && errors.Is(err, types.ErrEmptyLayers) {
+			return o.Storage.SetupEmptyRootfs(o.Name)
+		}
+		return err
 	default:
 		return errors.Errorf("unknown layer type: %v", o.Layer.From.Type)
 	}

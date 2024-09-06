@@ -7,12 +7,21 @@ import (
 
 	ispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
-	"stackerbuild.io/stacker/pkg/squashfs"
+	"machinerun.io/atomfs/squashfs"
 )
+
+var ErrEmptyLayers = errors.New("empty layers")
 
 type LayerType struct {
 	Type   string
 	Verity squashfs.VerityMetadata
+}
+
+func (lt LayerType) String() string {
+	if lt.Verity {
+		return fmt.Sprintf("%s+verity", lt.Type)
+	}
+	return lt.Type
 }
 
 func (lt LayerType) MarshalText() ([]byte, error) {
@@ -53,7 +62,7 @@ func NewLayerType(lt string, verity squashfs.VerityMetadata) (LayerType, error) 
 
 func NewLayerTypeManifest(manifest ispec.Manifest) (LayerType, error) {
 	if len(manifest.Layers) == 0 {
-		return LayerType{}, errors.Errorf("no existing layers to determine layer type")
+		return NewLayerType("tar", squashfs.VerityMetadataMissing)
 	}
 
 	switch manifest.Layers[0].MediaType {

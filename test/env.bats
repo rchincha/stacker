@@ -13,27 +13,27 @@ function teardown() {
     touch .stacker/imports/test/foo
     chmod -R 777 .stacker/imports
 
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 test:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         # make sure that /stacker is readonly
-        grep "/stacker" /proc/mounts | grep -P "\sro[\s,]"
+        grep "/stacker" /proc/mounts | grep "[[:space:]]ro[[:space:],]"
 
         # make sure stacker deleted the non-import
         [ ! -f /stacker/foo ]
 EOF
-    stacker build
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
 }
 
 @test "two stackers can't run at the same time" {
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 test:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         echo hello world
 EOF
@@ -43,13 +43,13 @@ EOF
 
     (
         flock 9
-        bad_stacker build
+        bad_stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
         echo "${output}" | grep "couldn't acquire lock"
     ) 9<roots/.lock
 
     (
         flock 9
-        bad_stacker build
+        bad_stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
         echo "${output}" | grep "couldn't acquire lock"
     ) 9<.stacker/.lock
 }
