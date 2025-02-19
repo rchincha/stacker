@@ -290,6 +290,6 @@ require (
 
 replace (
 	github.com/opencontainers/umoci => github.com/project-stacker/umoci v0.0.0-20240906174318-e9397ba4ced0
-	machinerun.io/atomfs => github.com/rchincha/atomfs v0.0.0-20250217174059-a0b78e163e7f
+	machinerun.io/atomfs => github.com/rchincha/atomfs v0.0.0-20250223060538-baa0a62678d1
 	stackerbuild.io/stacker-bom => github.com/project-stacker/stacker-bom v0.0.0-20240509203427-4d685e046780
 )
