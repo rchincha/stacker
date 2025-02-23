@@ -24,6 +24,7 @@ import (
 	"github.com/pkg/xattr"
 	stackerfs "machinerun.io/atomfs/pkg/fs"
 	stackeroci "machinerun.io/atomfs/pkg/oci"
+	fstypes "machinerun.io/atomfs/pkg/types"
 	"machinerun.io/atomfs/pkg/verity"
 	"stackerbuild.io/stacker/pkg/lib"
 	"stackerbuild.io/stacker/pkg/log"
@@ -281,7 +282,7 @@ func generateBlob(layerType types.LayerType, contents string, ociDir string, low
 		blob = layer.GenerateInsertLayer(contents, "/", false, &packOptions)
 		mediaType = ispec.MediaTypeImageLayer
 	} else {
-		fsi := stackerfs.New(stackerfs.FilesystemType(layerType.Type))
+		fsi := stackerfs.New(fstypes.FilesystemType(layerType.Type))
 		blob, mediaType, rootHash, err = fsi.Make(ociDir, contents, nil, layerType.Verity)
 		if err != nil {
 			return nil, "", "", err
