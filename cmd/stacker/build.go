@@ -56,8 +56,9 @@ func initCommonBuildFlags() []cli.Flag {
 			Value: cli.NewStringSlice("tar"),
 		},
 		&cli.BoolFlag{
-			Name:  "no-verity",
-			Usage: "do not append dm-verity data to fs archives",
+			Name:    "no-verity",
+			Usage:   "do not append dm-verity data to fs archives",
+			Aliases: []string{"no-squashfs-verity"},
 		},
 		&cli.BoolFlag{
 			Name:  "require-hash",
