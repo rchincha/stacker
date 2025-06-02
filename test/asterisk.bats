@@ -9,22 +9,22 @@ function teardown() {
 }
 
 @test "wildcards work in run section" {
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 a:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         mkdir /mybin
         cp /bin/* /mybin
 EOF
-    stacker build
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci unpack --image oci:a dest
     [ "$status" -eq 0 ]
 
 
-    for i in $(ls dest/rootfs/bin); do
-        stat dest/rootfs/mybin/$i
+    for i in dest/rootfs/bin/*; do
+        stat dest/rootfs/mybin/$(basename $i)
     done
 }
 

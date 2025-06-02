@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/klauspost/pgzip"
@@ -21,13 +22,17 @@ import (
 	"github.com/opencontainers/umoci/oci/layer"
 	"github.com/pkg/errors"
 	"github.com/pkg/xattr"
+	stackerfs "machinerun.io/atomfs/pkg/fs"
+	stackeroci "machinerun.io/atomfs/pkg/oci"
+	fstypes "machinerun.io/atomfs/pkg/types"
+	"machinerun.io/atomfs/pkg/verity"
 	"stackerbuild.io/stacker/pkg/lib"
 	"stackerbuild.io/stacker/pkg/log"
-	stackeroci "stackerbuild.io/stacker/pkg/oci"
-	"stackerbuild.io/stacker/pkg/squashfs"
 	"stackerbuild.io/stacker/pkg/storage"
 	"stackerbuild.io/stacker/pkg/types"
 )
+
+var tarEx sync.Mutex
 
 func safeOverlayName(d digest.Digest) string {
 	// dirs used in overlay lowerdir args can't have : in them, so lets
@@ -57,36 +62,19 @@ func (o *overlay) Unpack(tag, name string) error {
 
 	pool := NewThreadPool(runtime.NumCPU())
 
-	for _, layer := range manifest.Layers {
-		digest := layer.Digest
-		contents := overlayPath(o.config.RootFSDir, digest, "overlay")
-		if squashfs.IsSquashfsMediaType(layer.MediaType) {
-			// don't really need to do this in parallel, but what
-			// the hell.
-			pool.Add(func(ctx context.Context) error {
-				return unpackOne(cacheDir, contents, digest, true)
-			})
-		} else {
-			switch layer.MediaType {
-			case ispec.MediaTypeImageLayer:
-				fallthrough
-			case ispec.MediaTypeImageLayerGzip:
-				// don't extract things that have already been
-				// extracted
-				if _, err := os.Stat(contents); err == nil {
-					continue
-				}
-
-				// TODO: when the umoci API grows support for uid
-				// shifting, we can use the fancier features of context
-				// cancelling in the thread pool...
-				pool.Add(func(ctx context.Context) error {
-					return unpackOne(cacheDir, contents, digest, false)
-				})
-			default:
-				return errors.Errorf("unknown media type %s", layer.MediaType)
-			}
+	seen := map[digest.Digest]bool{}
+	for _, curLayer := range manifest.Layers {
+		// avoid calling unpackOne twice for the same digest
+		if seen[curLayer.Digest] {
+			continue
 		}
+		seen[curLayer.Digest] = true
+
+		// copy layer to avoid race on pool access.
+		l := curLayer
+		pool.Add(func(ctx context.Context) error {
+			return unpackOne(l, cacheDir, overlayPath(o.config.RootFSDir, l.Digest, "overlay"))
+		})
 	}
 
 	pool.DoneAddingJobs()
@@ -154,11 +142,16 @@ func ConvertAndOutput(config types.StackerConfig, tag, name string, layerType ty
 			return err
 		}
 
+		log.Debugf("new oci layer %s [%s] created from path %s as part of %s:%s",
+			desc.Digest, layerType, overlayPath(config.RootFSDir, theLayer.Digest), name, tag)
+
 		// slight hack, but this is much faster than a cp, and the
 		// layers are the same, just in different formats
-		err = os.Symlink(overlayPath(config.RootFSDir, theLayer.Digest), overlayPath(config.RootFSDir, desc.Digest))
-		if err != nil {
-			return errors.Wrapf(err, "failed to create squashfs symlink")
+		if !lib.PathExists(overlayPath(config.RootFSDir, desc.Digest)) {
+			err = os.Symlink(overlayPath(config.RootFSDir, theLayer.Digest), overlayPath(config.RootFSDir, desc.Digest))
+			if err != nil {
+				return errors.Wrapf(err, "failed to create squashfs symlink")
+			}
 		}
 		newManifest.Layers = append(newManifest.Layers, desc)
 		newConfig.RootFS.DiffIDs = append(newConfig.RootFS.DiffIDs, desc.Digest)
@@ -232,7 +225,8 @@ func (o *overlay) initializeBasesInOutput(name string, layerTypes []types.LayerT
 						return err
 					}
 				} else {
-					log.Debugf("converting between %v and %v", sourceLayerType, layerType)
+					log.Debugf("creating oci image %s (type=%s) by converting %s (type=%s)",
+						layerType.LayerName(name), layerType, sourceLayerType.LayerName(name), sourceLayerType)
 					err = ConvertAndOutput(o.config, cacheTag, name, layerType)
 					if err != nil {
 						return err
@@ -262,13 +256,13 @@ func (o *overlay) initializeBasesInOutput(name string, layerTypes []types.LayerT
 	return nil
 }
 
-func (o *overlay) Repack(name string, layerTypes []types.LayerType, sfm types.StackerFiles) error {
+func (o *overlay) Repack(name string, layer types.Layer, layerTypes []types.LayerType, sfm types.StackerFiles) error {
 	err := o.initializeBasesInOutput(name, layerTypes, sfm)
 	if err != nil {
 		return err
 	}
 
-	return repackOverlay(o.config, name, layerTypes)
+	return repackOverlay(o.config, name, layer, layerTypes)
 }
 
 // generateBlob generates either a tar blob or a squashfs blob based on layerType
@@ -278,11 +272,12 @@ func generateBlob(layerType types.LayerType, contents string, ociDir string) (io
 	var mediaType string
 	var rootHash string
 	if layerType.Type == "tar" {
-		packOptions := layer.RepackOptions{TranslateOverlayWhiteouts: true}
+		packOptions := layer.RepackOptions{OnDiskFormat: layer.OverlayfsRootfs{UserXattr: true}}
 		blob = layer.GenerateInsertLayer(contents, "/", false, &packOptions)
 		mediaType = ispec.MediaTypeImageLayer
 	} else {
-		blob, mediaType, rootHash, err = squashfs.MakeSquashfs(ociDir, contents, nil, layerType.Verity)
+		fsi := stackerfs.New(fstypes.FilesystemType(layerType.Type))
+		blob, mediaType, rootHash, err = fsi.Make(ociDir, contents, nil, layerType.Verity)
 		if err != nil {
 			return nil, "", "", err
 		}
@@ -305,7 +300,7 @@ func ociPutBlob(blob io.ReadCloser, config types.StackerConfig, layerMediaType s
 
 	annotations := map[string]string{}
 	if rootHash != "" {
-		annotations[squashfs.VerityRootHashAnnotation] = rootHash
+		annotations[verity.VerityRootHashAnnotation] = rootHash
 	}
 
 	desc := ispec.Descriptor{
@@ -353,7 +348,7 @@ func stripOverlayAttrsUnder(dirPath string) error {
 				return err
 			}
 			p := filepath.Join(dirPath, path)
-			if lib.IsSymlink(p) {
+			if isSymlink, _ := lib.IsSymlink(p); isSymlink {
 				// user.* xattrs "can not" exist on symlinks
 				return nil
 			}
@@ -361,7 +356,9 @@ func stripOverlayAttrsUnder(dirPath string) error {
 		})
 }
 
-func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mutate.Mutator, name string, layerTypes []types.LayerType) (bool, error) {
+func generateLayer(config types.StackerConfig, _ casext.Engine, mutators []*mutate.Mutator,
+	name string, layer types.Layer, layerTypes []types.LayerType,
+) (bool, error) {
 	dir := path.Join(config.RootFSDir, name, "overlay")
 	ents, err := os.ReadDir(dir)
 	if err != nil {
@@ -376,6 +373,9 @@ func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mu
 		if ovl.HasBuiltOCIOutput {
 			for i, layerType := range layerTypes {
 				manifest := ovl.Manifests[layerType]
+				if len(manifest.Layers) < 1 {
+					continue
+				}
 				layer := manifest.Layers[len(manifest.Layers)-1]
 
 				config := ovl.Configs[layerType]
@@ -425,7 +425,7 @@ func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mu
 		} else {
 			annotations := map[string]string{}
 			if rootHash != "" {
-				annotations[squashfs.VerityRootHashAnnotation] = rootHash
+				annotations[verity.VerityRootHashAnnotation] = rootHash
 			}
 			desc, err = mutator.Add(context.Background(), mediaType, blob, history, mutate.NoopCompressor, annotations)
 			if err != nil {
@@ -447,6 +447,7 @@ func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mu
 		return false, errors.Wrapf(err, "couldn't make new layer overlay dir")
 	}
 
+	log.Debugf("renaming %s -> %s", dir, path.Join(target, "overlay"))
 	err = os.Rename(dir, path.Join(target, "overlay"))
 	if err != nil {
 		if !os.IsExist(err) {
@@ -477,6 +478,7 @@ func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mu
 	for _, desc := range descs[1:] {
 		linkPath := overlayPath(config.RootFSDir, desc.Digest)
 
+		log.Debugf("link %s -> %s", linkPath, target)
 		err = os.Symlink(target, linkPath)
 		if err != nil {
 			// as above, this symlink may already exist; if it does, we can
@@ -521,7 +523,7 @@ func generateLayer(config types.StackerConfig, oci casext.Engine, mutators []*mu
 	return true, nil
 }
 
-func repackOverlay(config types.StackerConfig, name string, layerTypes []types.LayerType) error {
+func repackOverlay(config types.StackerConfig, name string, layer types.Layer, layerTypes []types.LayerType) error {
 	oci, err := umoci.OpenLayout(config.OCIDir)
 	if err != nil {
 		return err
@@ -548,7 +550,7 @@ func repackOverlay(config types.StackerConfig, name string, layerTypes []types.L
 		mutators = append(mutators, mutator)
 	}
 
-	log.Debugf("Generating overlay_dirs layers")
+	log.Debugf("Generating overlay_dirs layers for %s", name)
 	mutated := false
 	for i, layerType := range layerTypes {
 		ods, ok := ovl.OverlayDirLayers[layerType]
@@ -576,7 +578,7 @@ func repackOverlay(config types.StackerConfig, name string, layerTypes []types.L
 	// generate blobs for each build layer
 	for _, buildLayer := range ovl.BuiltLayers {
 
-		didMutate, err := generateLayer(config, oci, mutators, buildLayer, layerTypes)
+		didMutate, err := generateLayer(config, oci, mutators, buildLayer, layer, layerTypes)
 		if err != nil {
 			return err
 		}
@@ -611,7 +613,7 @@ func repackOverlay(config types.StackerConfig, name string, layerTypes []types.L
 		return err
 	}
 
-	didMutate, err := generateLayer(config, oci, mutators, name, layerTypes)
+	didMutate, err := generateLayer(config, oci, mutators, name, layer, layerTypes)
 	if err != nil {
 		return err
 	}
@@ -655,29 +657,60 @@ func repackOverlay(config types.StackerConfig, name string, layerTypes []types.L
 	return ovl.write(config, name)
 }
 
-func unpackOne(ociDir string, bundlePath string, digest digest.Digest, isSquashfs bool) error {
-	if isSquashfs {
-		return squashfs.ExtractSingleSquash(
-			path.Join(ociDir, "blobs", "sha256", digest.Encoded()),
-			bundlePath, "overlay")
+// unpackOne - unpack a single layer (Descriptor) found in ociDir to extractDir
+//
+//	The result of calling unpackOne is either error or the contents available
+//	at the provided extractDir.  The extractDir should be either empty or
+//	fully populated with this layer.
+func unpackOne(l ispec.Descriptor, ociDir string, extractDir string) error {
+	// population of a dir is not atomic, at least for tar extraction.
+	// As a result, we could hasDirEntries(extractDir) at the same time that
+	// something is un-populating that dir due to a failed extraction (like
+	// os.RemoveAll below).
+	// There needs to be a lock on the extract dir (scoped to the overlay storage backend).
+	// A sync.RWMutex would work well here since it is safe to check as long
+	// as no one is populating or unpopulating.
+	if hasDirEntries(extractDir) {
+		// the directory was already populated.
+		return nil
 	}
 
-	oci, err := umoci.OpenLayout(ociDir)
-	if err != nil {
+	if fsi := stackerfs.NewFromMediaType(l.MediaType); fsi != nil {
+		return fsi.ExtractSingle(
+			path.Join(ociDir, "blobs", "sha256", l.Digest.Encoded()), extractDir)
+	}
+
+	switch l.MediaType {
+	case ispec.MediaTypeImageLayer, ispec.MediaTypeImageLayerGzip:
+		tarEx.Lock()
+		defer tarEx.Unlock()
+
+		oci, err := umoci.OpenLayout(ociDir)
+		if err != nil {
+			return err
+		}
+		defer oci.Close()
+
+		compressed, err := oci.GetBlob(context.Background(), l.Digest)
+		if err != nil {
+			return err
+		}
+		defer compressed.Close()
+
+		uncompressed, err := pgzip.NewReader(compressed)
+		if err != nil {
+			return err
+		}
+
+		// always unpack with Overlay whiteout mode to prevent ignoring whiteouts in tar layers
+		// see test/publish.bats: "building from published images with whiteouts" for more details
+		err = layer.UnpackLayer(extractDir, uncompressed, &layer.UnpackOptions{OnDiskFormat: layer.OverlayfsRootfs{UserXattr: true}})
+		if err != nil {
+			if rmErr := os.RemoveAll(extractDir); rmErr != nil {
+				log.Errorf("Failed to remove dir '%s' after failed extraction: %v", extractDir, rmErr)
+			}
+		}
 		return err
 	}
-	defer oci.Close()
-
-	compressed, err := oci.GetBlob(context.Background(), digest)
-	if err != nil {
-		return err
-	}
-	defer compressed.Close()
-
-	uncompressed, err := pgzip.NewReader(compressed)
-	if err != nil {
-		return err
-	}
-
-	return layer.UnpackLayer(bundlePath, uncompressed, nil)
+	return errors.Errorf("unknown media type %s", l.MediaType)
 }

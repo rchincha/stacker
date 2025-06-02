@@ -3,10 +3,12 @@ package stacker
 import (
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
-	"strconv"
+	"path/filepath"
 
+	"github.com/pkg/errors"
 	"stackerbuild.io/stacker/pkg/container"
 	"stackerbuild.io/stacker/pkg/log"
 	"stackerbuild.io/stacker/pkg/types"
@@ -28,46 +30,30 @@ func BuildLayerArtifacts(sc types.StackerConfig, storage types.Storage, l types.
 	}
 	defer c.Close()
 
-	err = SetupBuildContainerConfig(sc, storage, c, tag)
+	inDir := types.InternalStackerDir
+	err = SetupBuildContainerConfig(sc, storage, c, inDir, name)
 	if err != nil {
 		log.Errorf("build container %v", err)
 		return err
 	}
 
-	err = SetupLayerConfig(sc, c, l, tag)
+	err = SetupLayerConfig(sc, c, l, inDir, tag)
 	if err != nil {
 		return err
 	}
 
-	binary, err := os.Readlink("/proc/self/exe")
-	if err != nil {
-		return err
-	}
-
-	if err := c.BindMount(binary, "/stacker/tools/static-stacker", ""); err != nil {
-		return err
-	}
-
-	cmd := "/stacker/tools/static-stacker"
+	cmd := []string{filepath.Join(inDir, types.BinStacker)}
 
 	if sc.Debug {
-		cmd += " --debug"
+		cmd = append(cmd, "--debug")
 	}
 
-	cmd += " internal-go"
-
-	author := l.Annotations[types.AuthorAnnotation]
-	org := l.Annotations[types.OrgAnnotation]
-	license := l.Annotations[types.LicenseAnnotation]
-	dest := "/stacker/artifacts"
-	cmd += fmt.Sprintf(" bom-build %s %s %s %s %s %s", dest,
-		strconv.Quote(author),
-		strconv.Quote(org),
-		strconv.Quote(license),
+	cmd = append(cmd, "bom", "build", filepath.Join(inDir, "artifacts"),
+		l.Annotations[types.AuthorAnnotation],
+		l.Annotations[types.OrgAnnotation],
+		l.Annotations[types.LicenseAnnotation],
 		pkg.Name, pkg.Version)
-	for _, ppath := range pkg.Paths {
-		cmd += " " + ppath
-	}
+	cmd = append(cmd, pkg.Paths...)
 	err = c.Execute(cmd, os.Stdin)
 	if err != nil {
 		return err
@@ -89,41 +75,29 @@ func VerifyLayerArtifacts(sc types.StackerConfig, storage types.Storage, l types
 	}
 	defer c.Close()
 
-	err = SetupBuildContainerConfig(sc, storage, c, tag)
+	inDir := types.InternalStackerDir
+	err = SetupBuildContainerConfig(sc, storage, c, inDir, name)
 	if err != nil {
 		log.Errorf("build container %v", err)
 		return err
 	}
 
-	err = SetupLayerConfig(sc, c, l, tag)
+	err = SetupLayerConfig(sc, c, l, inDir, tag)
 	if err != nil {
 		return err
 	}
 
-	binary, err := os.Readlink("/proc/self/exe")
-	if err != nil {
-		return err
-	}
-
-	if err := c.BindMount(binary, "/stacker/tools/static-stacker", ""); err != nil {
-		return err
-	}
-
-	cmd := "/stacker/tools/static-stacker"
+	cmd := []string{filepath.Join(inDir, types.BinStacker)}
 
 	if sc.Debug {
-		cmd += " --debug"
+		cmd = append(cmd, "--debug")
 	}
 
-	cmd += " internal-go"
+	cmd = append(cmd, "bom", "verify",
+		fmt.Sprintf(types.InternalStackerDir+"/artifacts/%s.json", tag),
+		l.Bom.Namespace,
+		tag, l.Annotations[types.AuthorAnnotation], l.Annotations[types.OrgAnnotation])
 
-	author := l.Annotations[types.AuthorAnnotation]
-	org := l.Annotations[types.OrgAnnotation]
-
-	dest := fmt.Sprintf("/stacker/artifacts/%s.json", tag)
-	cmd += fmt.Sprintf(" bom-verify %s %s %s %s", dest, tag,
-		strconv.Quote(author),
-		strconv.Quote(org))
 	err = c.Execute(cmd, os.Stdin)
 	if err != nil {
 		return err
@@ -137,7 +111,14 @@ func ImportArtifacts(sc types.StackerConfig, src types.ImageSource, name string)
 		// if a bom is available, add it here so it can be merged
 		srcpath := path.Join(sc.StackerDir, "artifacts", src.Tag, fmt.Sprintf("%s.json", src.Tag))
 
-		dstfp, err := os.CreateTemp(path.Join(sc.StackerDir, "artifacts", name), fmt.Sprintf("%s-*.json", name))
+		_, err := os.Lstat(srcpath)
+		if err != nil && errors.Is(err, fs.ErrNotExist) {
+			return nil
+		}
+
+		log.Infof("importing sbom from %s", srcpath)
+
+		dstfp, err := os.CreateTemp(path.Join(sc.StackerDir, "artifacts", name), fmt.Sprintf("%s-*.json", src.Tag))
 		if err != nil {
 			return err
 		}

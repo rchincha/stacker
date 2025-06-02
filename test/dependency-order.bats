@@ -22,16 +22,16 @@ EOF
 }
 
 @test "imports missing fails and prints" {
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 test:
     from:
         type: oci
-        tag: $CENTOS_OCI
-    import:
+        tag: ${{BUSYBOX_OCI}}
+    imports:
         - stacker://foo/bar
         - stacker://baz/foo
 EOF
-    bad_stacker build
+    bad_stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     echo "${output}" | grep "couldn't find dependencies for test: stacker://foo/bar, stacker://baz/foo"
 }
 
@@ -74,14 +74,14 @@ installer-iso-build:
         type: built
         tag: minbase1
     build_only: true
-    import:
+    imports:
         - stacker://installer-initrd/output/installer-initrd-base.cpio
         - stacker://installer-initrd-modules/output/installer-initrd-modules.cpio
     run: |
         #!/bin/bash -ex
         # populate the iso
         mkdir /output
-        tar -cf /output/installer-iso.tar -C /stacker .
+        ( cd /stacker/imports && tar -cf /output/installer-iso.tar *.cpio )
 
 atomix-installer-iso:
     from:

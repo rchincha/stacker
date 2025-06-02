@@ -10,14 +10,14 @@ function teardown() {
 }
 
 @test "build only + missing prereq fails" {
-    cat > prereq.yaml <<EOF
+    cat > prereq.yaml <<"EOF"
 parent:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
 EOF
 
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 config:
     prerequisites:
         - ./prereq.yaml
@@ -27,19 +27,19 @@ child:
         tag: zomg
     run: echo "d2" > /bestgame
 EOF
-    bad_stacker build
+    bad_stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     echo $output | grep "couldn't resolve some dependencies"
 }
 
 @test "build only + prerequisites work" {
-    cat > prereq.yaml <<EOF
+    cat > prereq.yaml <<"EOF"
 parent:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
 EOF
 
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 config:
     prerequisites:
         - ./prereq.yaml
@@ -49,17 +49,17 @@ child:
         tag: parent
     run: echo "d2" > /bestgame
 EOF
-    stacker build
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci unpack --image oci:child dest
     [ "$(cat dest/rootfs/bestgame)" == "d2" ]
 }
 
 @test "after build only failure works" {
-    cat > stacker.yaml <<EOF
+    cat > stacker.yaml <<"EOF"
 parent:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         false
     build_only: true
@@ -70,61 +70,61 @@ child:
     run: |
         touch /child
 EOF
-    bad_stacker build
+    bad_stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     sed 's/false/true/g' -i stacker.yaml
-    stacker build
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci unpack --image oci:child dest
     [ -f dest/rootfs/child ]
 }
 
 @test "build only stacker" {
-    cat > stacker.yaml <<EOF
-centos:
+    cat > stacker.yaml <<"EOF"
+busybox:
     from:
         type: oci
-        url: $CENTOS_OCI
-    import: https://www.cisco.com/favicon.ico
+        url: ${{BUSYBOX_OCI}}
+    imports: https://www.cisco.com/favicon.ico
     run: |
         cp /stacker/imports/favicon.ico /favicon.ico
     build_only: true
 layer1:
     from:
         type: built
-        tag: centos
-    import:
-        - stacker://centos/favicon.ico
+        tag: busybox
+    imports:
+        - stacker://busybox/favicon.ico
     run:
         - cp /stacker/imports/favicon.ico /favicon2.ico
 EOF
-    stacker build
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
     umoci unpack --image oci:layer1 dest
     [ "$(sha dest/rootfs/favicon.ico)" == "$(sha dest/rootfs/favicon2.ico)" ]
     [ "$(umoci ls --layout ./oci)" == "$(printf "layer1")" ]
 }
 
 @test "stacker grab" {
-    cat > stacker.yaml <<EOF
-centos:
+    cat > stacker.yaml <<"EOF"
+busybox:
     from:
         type: oci
-        url: $CENTOS_OCI
-    import: https://www.cisco.com/favicon.ico
+        url: ${{BUSYBOX_OCI}}
+    imports: https://www.cisco.com/favicon.ico
     run: |
         cp /stacker/imports/favicon.ico /favicon.ico
     build_only: true
 layer1:
     from:
         type: built
-        tag: centos
-    import:
-        - stacker://centos/favicon.ico
+        tag: busybox
+    imports:
+        - stacker://busybox/favicon.ico
     run:
         - cp /stacker/imports/favicon.ico /favicon2.ico
 EOF
-    stacker build
-    stacker grab centos:/favicon.ico
+    stacker build --substitute BUSYBOX_OCI=${BUSYBOX_OCI}
+    stacker grab busybox:/favicon.ico
     [ -f favicon.ico ]
-    [ "$(sha favicon.ico)" == "$(sha .stacker/imports/centos/favicon.ico)" ]
+    [ "$(sha favicon.ico)" == "$(sha .stacker/imports/busybox/favicon.ico)" ]
 }
 
 @test "build only + unpriv + overlay clears state" {
@@ -132,7 +132,7 @@ EOF
 first:
     from:
         type: oci
-        url: ${{CENTOS_OCI}}
+        url: ${{BUSYBOX_OCI}}
     build_only: true
     run: |
         echo "run number ${{RUN_NUMBER}}"
@@ -144,8 +144,8 @@ first:
         chmod 500 $THEPATH
 EOF
 
-    stacker build --layer-type=squashfs --substitute "RUN_NUMBER=1" --substitute CENTOS_OCI=$CENTOS_OCI
-    stacker build --layer-type=squashfs --substitute "RUN_NUMBER=2" --substitute CENTOS_OCI=$CENTOS_OCI
+    stacker build --layer-type=squashfs --substitute "RUN_NUMBER=1" --substitute BUSYBOX_OCI=$BUSYBOX_OCI
+    stacker build --layer-type=squashfs --substitute "RUN_NUMBER=2" --substitute BUSYBOX_OCI=$BUSYBOX_OCI
 }
 
 @test "multiple build onlys in final chain rebuild OK" {
@@ -153,7 +153,7 @@ EOF
 one:
     from:
         type: oci
-        url: $CENTOS_OCI
+        url: ${{BUSYBOX_OCI}}
     run: |
         touch /1
 two:
@@ -181,12 +181,12 @@ four:
         [ -f /3 ]
         echo run number ${{RUN_NUMBER}}
 EOF
-    stacker build --substitute "RUN_NUMBER=1" --substitute CENTOS_OCI=$CENTOS_OCI
-    stacker build --substitute "RUN_NUMBER=2" --substitute CENTOS_OCI=$CENTOS_OCI
+    stacker build --substitute "RUN_NUMBER=1" --substitute BUSYBOX_OCI=$BUSYBOX_OCI
+    stacker build --substitute "RUN_NUMBER=2" --substitute BUSYBOX_OCI=$BUSYBOX_OCI
 
     stacker inspect
 
-    # should always build five layers, assuming centos is 1 layer
+    # should always build five layers, assuming busybox is 1 layer
     one_manifest=$(cat oci/index.json | jq -r .manifests[0].digest | cut -f2 -d:)
     one_layercount=$(cat oci/blobs/sha256/$one_manifest | jq -r '.layers | length')
     echo one_layercount "$one_layercount"

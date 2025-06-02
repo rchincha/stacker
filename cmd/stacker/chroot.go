@@ -50,10 +50,10 @@ func doChroot(ctx *cli.Context) error {
 		tag = ctx.Args().Get(0)
 	}
 
-	cmd := stacker.DefaultShell
+	cmd := []string{stacker.DefaultShell}
 
 	if ctx.Args().Len() > 1 {
-		cmd = ctx.Args().Get(1)
+		cmd[0] = ctx.Args().Get(1)
 	}
 
 	file := ctx.String("f")
@@ -98,11 +98,11 @@ func doChroot(ctx *cli.Context) error {
 	}
 	defer c.Close()
 
-	err = stacker.SetupBuildContainerConfig(config, s, c, name)
+	err = stacker.SetupBuildContainerConfig(config, s, c, types.InternalStackerDir, name)
 	if err != nil {
 		return err
 	}
-	err = stacker.SetupLayerConfig(config, c, layer, name)
+	err = stacker.SetupLayerConfig(config, c, layer, types.InternalStackerDir, name)
 	if err != nil {
 		return err
 	}

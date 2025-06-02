@@ -11,6 +11,7 @@ import (
 	"path"
 	"syscall"
 
+	ispec "github.com/opencontainers/image-spec/specs-go/v1"
 	"github.com/pkg/errors"
 	"golang.org/x/sys/unix"
 	"stackerbuild.io/stacker/pkg/types"
@@ -47,7 +48,7 @@ func canMountOverlay() error {
 		return errors.Wrapf(err, "couldn't create overlay mountpoint dir")
 	}
 
-	opts := fmt.Sprintf("lowerdir=%s:%s", lower1, lower2)
+	opts := fmt.Sprintf("userxattr,lowerdir=%s:%s", lower1, lower2)
 	err = unix.Mount("overlay", mountpoint, "overlay", 0, opts)
 	defer unix.Unmount(mountpoint, 0)
 	if err != nil {
@@ -141,6 +142,14 @@ func (o *overlay) SetupEmptyRootfs(name string) error {
 	return ovl.write(o.config, name)
 }
 
+func hasDirEntries(dir string) bool {
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return false
+	}
+	return len(ents) != 0
+}
+
 func (o *overlay) snapshot(source string, target string) error {
 	err := o.Create(target)
 	if err != nil {
@@ -151,6 +160,18 @@ func (o *overlay) snapshot(source string, target string) error {
 	ovl, err := readOverlayMetadata(o.config.RootFSDir, source)
 	if err != nil {
 		return err
+	}
+
+	var manifest ispec.Manifest
+	for _, m := range ovl.Manifests {
+		manifest = m
+	}
+	ociDir := path.Join(o.config.StackerDir, "layer-bases", "oci")
+	for _, layer := range manifest.Layers {
+		err := unpackOne(layer, ociDir, overlayPath(o.config.RootFSDir, layer.Digest, "overlay"))
+		if err != nil {
+			return errors.Wrapf(err, "Failed mounting %#v", layer)
+		}
 	}
 
 	ovl.BuiltLayers = append(ovl.BuiltLayers, source)

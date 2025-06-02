@@ -3,16 +3,15 @@ package stacker
 import (
 	"fmt"
 	"io/fs"
-	"os"
 	"path"
+	"path/filepath"
 
-	"github.com/pkg/errors"
 	"stackerbuild.io/stacker/pkg/container"
 	"stackerbuild.io/stacker/pkg/types"
 )
 
 func Grab(sc types.StackerConfig, storage types.Storage, name string, source string, targetDir string,
-	mode *fs.FileMode, uid, gid int,
+	idest string, mode *fs.FileMode, uid, gid int,
 ) error {
 	c, err := container.New(sc, name)
 	if err != nil {
@@ -20,34 +19,31 @@ func Grab(sc types.StackerConfig, storage types.Storage, name string, source str
 	}
 	defer c.Close()
 
-	err = c.BindMount(targetDir, "/stacker", "")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(path.Join(sc.RootFSDir, name, "rootfs", "stacker"))
-
-	binary, err := os.Readlink("/proc/self/exe")
-	if err != nil {
-		return errors.Wrapf(err, "couldn't find executable for bind mount")
-	}
-
-	err = c.BindMount(binary, "/stacker/tools/static-stacker", "")
+	err = SetupBuildContainerConfig(sc, storage, c, types.InternalStackerDir, name)
 	if err != nil {
 		return err
 	}
 
-	err = SetupBuildContainerConfig(sc, storage, c, name)
+	idestdir := filepath.Join(types.InternalStackerDir, "grab")
+	err = c.BindMount(targetDir, idestdir, "")
 	if err != nil {
 		return err
 	}
 
-	err = c.Execute(fmt.Sprintf("/stacker/tools/static-stacker internal-go cp %s /stacker/%s", source, path.Base(source)), nil)
+	bcmd := []string{filepath.Join(types.InternalStackerDir, types.BinStacker), "internal-go"}
+
+	iDestName := filepath.Join(idestdir, path.Base(source))
+	if idest == "" || source[len(source)-1:] != "/" {
+		err = c.Execute(append(bcmd, "cp", source, iDestName), nil)
+	} else {
+		err = c.Execute(append(bcmd, "cp", source, idestdir+"/"), nil)
+	}
 	if err != nil {
 		return err
 	}
 
 	if mode != nil {
-		err = c.Execute(fmt.Sprintf("/stacker/tools/static-stacker internal-go chmod %s /stacker/%s", fmt.Sprintf("%o", *mode), path.Base(source)), nil)
+		err = c.Execute(append(bcmd, "chmod", fmt.Sprintf("%o", *mode), iDestName), nil)
 		if err != nil {
 			return err
 		}
@@ -59,7 +55,7 @@ func Grab(sc types.StackerConfig, storage types.Storage, name string, source str
 			owns += fmt.Sprintf(":%d", gid)
 		}
 
-		err = c.Execute(fmt.Sprintf("/stacker/tools/static-stacker internal-go chown %s /stacker/%s", owns, path.Base(source)), nil)
+		err = c.Execute(append(bcmd, "chown", owns, iDestName), nil)
 		if err != nil {
 			return err
 		}
