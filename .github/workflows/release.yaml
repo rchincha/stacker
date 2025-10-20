@@ -32,6 +32,12 @@ jobs:
   release:
     name: "Tagged Release"
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: true
+      matrix:
+        platform:
+          - linux-amd64  # ubuntu 24.04
+          - linux-arm64  # ubuntu 24.04-arm64
     # needs ci for the cached stacker binary
     needs: [build-id, ci]
     steps:
@@ -39,13 +45,13 @@ jobs:
         id: restore-build
         with:
           path: stacker
-          key: ${{needs.build-id.outputs.build-id}}
+          key: ${{needs.build-id.outputs.build-id}}-${{ matrix.platform }}
       - if: github.event_name == 'release' && github.event.action == 'published'
         name: Publish artifacts on releases
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: stacker
+          file: stacker-*
           tag: ${{ github.ref }}
           overwrite: true
           file_glob: true
